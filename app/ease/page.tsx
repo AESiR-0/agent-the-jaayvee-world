@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { signInWithPhoneNumber, PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
-import { auth, createRecaptchaVerifier } from '@/lib/firebaseClient';
+import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
+import { sendOTP, completeAuth, storeUserData } from '@/lib/firebaseUtils';
 import { API_BASE_URL } from '@/lib/utils';
 import dynamic from 'next/dynamic';
 
@@ -24,7 +24,7 @@ interface MerchantFormData {
   longitude?: number;
 }
 
-export default function EasePage() {
+function EasePageContent() {
   const searchParams = useSearchParams();
   const merchantId = searchParams.get('merchantId');
   const role = searchParams.get('role');
@@ -78,12 +78,17 @@ export default function EasePage() {
     setError('');
 
     try {
-      const recaptchaVerifier = createRecaptchaVerifier('recaptcha-container');
-      const confirmationResult = await signInWithPhoneNumber(auth, formData.phone, recaptchaVerifier);
-      setVerificationId(confirmationResult.verificationId);
-      // Show OTP input (you could add a state for this)
+      const result = await sendOTP(formData.phone);
+      
+      if (result.success && result.verificationId) {
+        setVerificationId(result.verificationId);
+        console.log('✅ OTP sent successfully');
+      } else {
+        setError(result.error || 'Failed to send OTP. Please try again.');
+      }
     } catch (error: any) {
-      setError(error.message);
+      console.error('Phone authentication error:', error);
+      setError(error.message || 'Failed to send OTP. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -95,30 +100,33 @@ export default function EasePage() {
     setError('');
 
     try {
-      const credential = PhoneAuthProvider.credential(verificationId, otp);
-      const result = await signInWithCredential(auth, credential);
-      const idToken = await result.user.getIdToken();
+      const result = await completeAuth(verificationId, otp);
+      
+      if (result.success && result.data) {
+        // Submit merchant activation
+        const response = await fetch(`${API_BASE_URL}/merchant/activate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            firebaseToken: localStorage.getItem('firebaseToken') || 'mock_token',
+            merchantId,
+            ...formData,
+          }),
+        });
 
-      // Submit merchant activation
-      const response = await fetch(`${API_BASE_URL}/merchant/activate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          firebaseToken: idToken,
-          merchantId,
-          ...formData,
-        }),
-      });
+        if (!response.ok) {
+          throw new Error('Activation failed');
+        }
 
-      if (!response.ok) {
-        throw new Error('Activation failed');
+        setStep('success');
+      } else {
+        setError(result.error || 'Authentication failed. Please try again.');
       }
-
-      setStep('success');
     } catch (error: any) {
-      setError(error.message);
+      console.error('Authentication error:', error);
+      setError(error.message || 'Authentication failed. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -267,5 +275,17 @@ export default function EasePage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function EasePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-foreground/70">Loading...</div>
+      </div>
+    }>
+      <EasePageContent />
+    </Suspense>
   );
 }

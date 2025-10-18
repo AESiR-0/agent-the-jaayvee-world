@@ -7,25 +7,13 @@ import dynamic from 'next/dynamic';
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false });
-const useMapEvents = dynamic(() => import('react-leaflet').then(mod => mod.useMapEvents), { ssr: false });
 
 interface LocationPickerProps {
   onLocationSelect: (lat: number, lng: number) => void;
 }
 
-function MapEvents({ onLocationSelect }: { onLocationSelect: (lat: number, lng: number) => void }) {
-  const [position, setPosition] = useState<[number, number] | null>(null);
-
-  useMapEvents({
-    click: (e) => {
-      const { lat, lng } = e.latlng;
-      setPosition([lat, lng]);
-      onLocationSelect(lat, lng);
-    },
-  });
-
-  return position ? <Marker position={position} /> : null;
-}
+// Create a separate component for map events that can be dynamically imported
+const MapEventsComponent = dynamic(() => import('./MapEventsComponent'), { ssr: false });
 
 export default function LocationPicker({ onLocationSelect }: LocationPickerProps) {
   const [isClient, setIsClient] = useState(false);
@@ -70,7 +58,7 @@ export default function LocationPicker({ onLocationSelect }: LocationPickerProps
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
-        <MapEvents onLocationSelect={onLocationSelect} />
+        <MapEventsComponent onLocationSelect={onLocationSelect} />
       </MapContainer>
     </div>
   );
