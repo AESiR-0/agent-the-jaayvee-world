@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
-import { sendOTP, completeAuth, storeUserData } from '@/lib/firebaseUtils';
+import { verifyOTP, createRecaptchaVerifier, clearRecaptchaVerifier, signInWithPhoneNumber, auth } from '@/lib/firebaseClient';
 import { API_BASE_URL } from '@/lib/utils';
 import dynamic from 'next/dynamic';
 
@@ -78,16 +78,22 @@ function EasePageContent() {
     setError('');
 
     try {
-      const result = await sendOTP(formData.phone);
+      // Clear any existing reCAPTCHA
+      clearRecaptchaVerifier('recaptcha-container');
+      console.log('🧹 Cleared reCAPTCHA');
       
-      if (result.success && result.verificationId) {
-        setVerificationId(result.verificationId);
-        console.log('✅ OTP sent successfully');
-      } else {
-        setError(result.error || 'Failed to send OTP. Please try again.');
-      }
+      const recaptchaVerifier = createRecaptchaVerifier('recaptcha-container');
+      console.log('🔐 Created reCAPTCHA verifier');
+      
+      console.log('📞 Calling signInWithPhoneNumber...');
+      const confirmationResult = await signInWithPhoneNumber(auth, formData.phone, recaptchaVerifier);
+      console.log('✅ OTP sent successfully!', confirmationResult.verificationId);
+      
+      setVerificationId(confirmationResult.verificationId);
+      setStep('form');
+      console.log('✅ OTP sent successfully');
     } catch (error: any) {
-      console.error('Phone authentication error:', error);
+      console.error('Phone verification error:', error);
       setError(error.message || 'Failed to send OTP. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -100,9 +106,9 @@ function EasePageContent() {
     setError('');
 
     try {
-      const result = await completeAuth(verificationId, otp);
+      const result = await verifyOTP(verificationId, otp);
       
-      if (result.success && result.data) {
+      if (result.success) {
         // Submit merchant activation
         const response = await fetch(`${API_BASE_URL}/merchant/activate`, {
           method: 'POST',
@@ -122,11 +128,11 @@ function EasePageContent() {
 
         setStep('success');
       } else {
-        setError(result.error || 'Authentication failed. Please try again.');
+        setError(result.error || 'Verification failed. Please try again.');
       }
     } catch (error: any) {
-      console.error('Authentication error:', error);
-      setError(error.message || 'Authentication failed. Please try again.');
+      console.error('Verification error:', error);
+        setError(error.message || 'Verification failed. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

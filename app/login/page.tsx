@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { sendOTP, completeAuth } from '@/lib/firebaseUtils';
+import { verifyOTP, createRecaptchaVerifier, clearRecaptchaVerifier, signInWithPhoneNumber, auth } from '@/lib/firebaseClient';
 import { useFirebase } from '@/lib/useFirebase';
 
 export default function LoginPage() {
@@ -14,6 +14,70 @@ export default function LoginPage() {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const router = useRouter();
   const { isInitialized: isFirebaseReady, error: firebaseError } = useFirebase();
+
+  const sendOTP = async (phoneNumber: string, recaptchaElementId: string = 'recaptcha-container') => {
+    try {
+      console.log('🔍 Sending OTP to:', phoneNumber);
+      
+      // Clear any existing reCAPTCHA
+      clearRecaptchaVerifier(recaptchaElementId);
+      console.log('🧹 Cleared reCAPTCHA');
+      
+      const recaptchaVerifier = createRecaptchaVerifier(recaptchaElementId);
+      console.log('🔐 Created reCAPTCHA verifier');
+      
+      console.log('📞 Calling signInWithPhoneNumber...');
+      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+      console.log('✅ OTP sent successfully!', confirmationResult.verificationId);
+      
+      return {
+        success: true,
+        verificationId: confirmationResult.verificationId
+      };
+    } catch (error: any) {
+      console.error('❌ Send OTP error:', error);
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      
+      // Handle specific Firebase errors
+      if (error.code === 'auth/too-many-requests') {
+        return {
+          success: false,
+          error: 'Too many OTP requests. Please wait 1-2 hours before trying again.'
+        };
+      } else if (error.code === 'auth/invalid-phone-number') {
+        return {
+          success: false,
+          error: 'Invalid phone number format. Please use international format like +91 9876543210'
+        };
+      } else if (error.code === 'auth/invalid-app-credential') {
+        return {
+          success: false,
+          error: 'Authentication service error. Please try again later.'
+        };
+      } else if (error.code === 'auth/captcha-check-failed') {
+        return {
+          success: false,
+          error: 'Security verification failed. Please try again.'
+        };
+      } else if (error.code === 'auth/network-request-failed') {
+        return {
+          success: false,
+          error: 'Network error. Please check your internet connection and try again.'
+        };
+      } else if (error.code === 'auth/quota-exceeded') {
+        return {
+          success: false,
+          error: 'SMS quota exceeded. Please try again later.'
+        };
+      }
+      
+      return {
+        success: false,
+        error: error.message || 'Failed to send OTP. Please try again.'
+      };
+    }
+  };
 
   useEffect(() => {
     // Check if user is already logged in
@@ -58,7 +122,7 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const result = await completeAuth(verificationId, otp);
+      const result = await verifyOTP(verificationId, otp);
       
       if (result.success && result.user) {
         // Store user data in localStorage
