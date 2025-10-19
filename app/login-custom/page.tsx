@@ -2,23 +2,21 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { sendOTP, completeAuth } from '@/lib/firebaseUtils';
-import { useFirebase } from '@/lib/useFirebase';
+import { sendAuthOTP, verifyAuthOTP } from '@/lib/customAuth';
 
-export default function LoginPage() {
+export default function CustomLoginPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otp, setOtp] = useState('');
-  const [verificationId, setVerificationId] = useState('');
+  const [otpId, setOtpId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const router = useRouter();
-  const { isInitialized: isFirebaseReady, error: firebaseError } = useFirebase();
 
   useEffect(() => {
     // Check if user is already logged in
-    const agentId = localStorage.getItem('agentId');
-    if (agentId) {
+    const userId = localStorage.getItem('userId');
+    if (userId) {
       router.push('/dashboard');
     }
   }, [router]);
@@ -26,23 +24,18 @@ export default function LoginPage() {
   const handlePhoneSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!isFirebaseReady) {
-      setError('Firebase is not ready. Please wait and try again.');
-      return;
-    }
-    
     setIsLoading(true);
     setError('');
 
     try {
-      const result = await sendOTP(phoneNumber);
+      const result = await sendAuthOTP(phoneNumber);
       
-      if (result.success && result.verificationId) {
-        setVerificationId(result.verificationId);
+      if (result.success && result.otpId) {
+        setOtpId(result.otpId);
         setStep('otp');
         console.log('✅ OTP sent successfully');
       } else {
-        setError(result.error || 'Failed to send OTP. Please try again.');
+        setError(result.message || 'Failed to send OTP. Please try again.');
       }
     } catch (error: any) {
       console.error('Phone authentication error:', error);
@@ -58,13 +51,14 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const result = await completeAuth(verificationId, otp);
+      const result = await verifyAuthOTP(otpId, otp, phoneNumber);
       
       if (result.success && result.user) {
         // Store user data in localStorage
-        localStorage.setItem('firebaseToken', await result.user.getIdToken());
-        localStorage.setItem('userId', result.user.uid);
-        localStorage.setItem('phoneNumber', result.user.phoneNumber || '');
+        localStorage.setItem('userId', result.user.id);
+        localStorage.setItem('phoneNumber', result.user.phoneNumber);
+        localStorage.setItem('verified', result.user.verified.toString());
+        localStorage.setItem('authProvider', 'custom');
         
         console.log('✅ Authentication complete, redirecting to dashboard');
         router.push('/dashboard');
@@ -84,38 +78,17 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-bold text-foreground">
-            Agents Dashboard
+            Custom OTP Authentication
           </h2>
           <p className="mt-2 text-center text-sm text-foreground/70">
-            Sign in with your phone number
+            Sign in with your phone number using our custom OTP service
           </p>
-          
+          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-xl">
+            <p className="text-xs text-green-800">
+              <strong>Custom OTP Service:</strong> No Firebase dependency. Full control over OTP generation and SMS delivery.
+            </p>
+          </div>
         </div>
-
-
-        {!isFirebaseReady && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-            <p className="text-sm text-yellow-800">
-              ⏳ Initializing Firebase... Please wait.
-            </p>
-          </div>
-        )}
-
-        {firebaseError && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-            <p className="text-sm text-red-800">
-              ❌ Firebase Error: {firebaseError}
-            </p>
-          </div>
-        )}
-
-        {process.env.NODE_ENV === 'development' && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-            <p className="text-sm text-green-800">
-              🧪 <strong>Development Mode:</strong> Using mock authentication and backend responses. Backend API may not be available.
-            </p>
-          </div>
-        )}
 
         <div className="bg-white rounded-xl border border-border shadow-soft p-8">
           {step === 'phone' ? (
@@ -137,10 +110,10 @@ export default function LoginPage() {
 
               <button
                 type="submit"
-                disabled={isLoading || !isFirebaseReady}
+                disabled={isLoading}
                 className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-accent hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent disabled:opacity-50"
               >
-                {isLoading ? 'Sending OTP...' : !isFirebaseReady ? 'Initializing...' : 'Send OTP'}
+                {isLoading ? 'Sending OTP...' : 'Send OTP'}
               </button>
             </form>
           ) : (
@@ -187,11 +160,14 @@ export default function LoginPage() {
               <p className="text-sm text-red-600">{error}</p>
             </div>
           )}
+        </div>
 
-          <div id="recaptcha-container"></div>
+        <div className="text-center">
+          <p className="text-sm text-foreground/70">
+            Using custom OTP service with full control
+          </p>
         </div>
       </div>
-      
     </div>
   );
 }

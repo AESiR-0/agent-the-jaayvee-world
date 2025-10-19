@@ -1,181 +1,43 @@
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, RecaptchaVerifier, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
+import { initializeApp } from 'firebase/app';
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
 
-// Firebase configuration with validation
+// Export Firebase functions
+export { signInWithPhoneNumber, PhoneAuthProvider, signInWithCredential };
+
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '',
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
+  apiKey: "AIzaSyBq0Mxkl0CASEi3MfyTnZUP7R071u3rnu0",
+  authDomain: "tjw-otp-service.firebaseapp.com",
+  projectId: "tjw-otp-service",
+  storageBucket: "tjw-otp-service.firebasestorage.app",
+  messagingSenderId: "236468227907",
+  appId: "1:236468227907:web:78ce6d56be0907a2bfe9f6"
 };
 
-// Validate Firebase configuration
-const validateFirebaseConfig = () => {
-  const requiredKeys = [
-    'apiKey',
-    'authDomain', 
-    'projectId',
-    'storageBucket',
-    'messagingSenderId',
-    'appId'
-  ];
+console.log('Firebase Config:', firebaseConfig);
 
-  const missingKeys = requiredKeys.filter(key => !firebaseConfig[key as keyof typeof firebaseConfig]);
-  
-  if (missingKeys.length > 0) {
-    console.error('❌ Missing Firebase configuration:', missingKeys);
-    throw new Error(`Missing Firebase configuration: ${missingKeys.join(', ')}`);
-  }
+const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
 
-  console.log('✅ Firebase configuration validated');
-  return true;
-};
-
-// Initialize Firebase app (prevent multiple initializations)
-let app: FirebaseApp | undefined;
-let auth: Auth | undefined;
-let firestore: Firestore | undefined;
-let storage: FirebaseStorage | undefined;
-
-// Debug function to log config
-const debugConfig = () => {
-  console.log('🔍 Firebase Config Debug:');
-  console.log('API Key:', firebaseConfig.apiKey ? `${firebaseConfig.apiKey.substring(0, 10)}...` : 'Missing');
-  console.log('Auth Domain:', firebaseConfig.authDomain);
-  console.log('Project ID:', firebaseConfig.projectId);
-  console.log('Storage Bucket:', firebaseConfig.storageBucket);
-  console.log('Messaging Sender ID:', firebaseConfig.messagingSenderId);
-  console.log('App ID:', firebaseConfig.appId);
-  console.log('Full Config:', JSON.stringify(firebaseConfig, null, 2));
-};
-
-// Initialize Firebase - will be called when needed
-const initializeFirebase = () => {
-  if (typeof window === 'undefined') {
-    console.log('⚠️ Firebase initialization skipped (server-side)');
-    return;
-  }
-
-  try {
-    // Debug config in browser
-    debugConfig();
-
-    // Validate config first
-    validateFirebaseConfig();
-
-    // Initialize app if not already initialized
-    if (getApps().length === 0) {
-      app = initializeApp(firebaseConfig);
-      console.log('🚀 Firebase app initialized');
-      console.log('App name:', app.name);
-      console.log('App options:', app.options);
-    } else {
-      app = getApps()[0];
-      console.log('♻️ Using existing Firebase app');
-      console.log('Existing app name:', app.name);
-      console.log('Existing app options:', app.options);
-    }
-
-    // Initialize services
-    auth = getAuth(app);
-    firestore = getFirestore(app);
-    storage = getStorage(app);
-
-    console.log('✅ Firebase services initialized');
-    console.log('Auth app name:', auth.app.name);
-    console.log('Auth app options:', auth.app.options);
-  } catch (error) {
-    console.error('❌ Firebase initialization failed:', error);
-    console.error('Config that failed:', firebaseConfig);
-    throw error;
-  }
-};
-
-// Initialize immediately if in browser
-if (typeof window !== 'undefined') {
-  initializeFirebase();
-}
-
-// Enhanced reCAPTCHA verifier with error handling
 export const createRecaptchaVerifier = (elementId: string) => {
-  // Ensure Firebase is initialized
-  if (typeof window !== 'undefined' && !auth) {
-    initializeFirebase();
-  }
-  
-  if (!auth) {
-    throw new Error('Firebase auth not initialized');
-  }
-  
-  try {
-    const recaptchaVerifier = new RecaptchaVerifier(auth, elementId, {
-      size: 'invisible',
-      callback: (response: any) => {
-        console.log('✅ reCAPTCHA solved');
-      },
-      'expired-callback': () => {
-        console.log('⏰ reCAPTCHA expired');
-      },
-      'error-callback': (error: any) => {
-        console.error('❌ reCAPTCHA error:', error);
-      }
-    });
-
-    return recaptchaVerifier;
-  } catch (error) {
-    console.error('❌ Failed to create reCAPTCHA verifier:', error);
-    throw error;
-  }
-};
-
-// Clear reCAPTCHA verifier
-export const clearRecaptchaVerifier = (elementId: string) => {
-  try {
-    const element = document.getElementById(elementId);
-    if (element) {
-      element.innerHTML = '';
+  return new RecaptchaVerifier(auth, elementId, {
+    size: 'normal',
+    callback: (response: any) => {
+      console.log('reCAPTCHA solved');
+    },
+    'expired-callback': () => {
+      console.log('reCAPTCHA expired');
     }
-  } catch (error) {
-    console.error('❌ Failed to clear reCAPTCHA:', error);
+  });
+};
+
+export const clearRecaptchaVerifier = (elementId: string) => {
+  const element = document.getElementById(elementId);
+  if (element) {
+    element.innerHTML = '';
   }
 };
 
-// Auth state change handler
-export const onAuthStateChanged = (callback: (user: any) => void) => {
-  // Ensure Firebase is initialized
-  if (typeof window !== 'undefined' && !auth) {
-    initializeFirebase();
-  }
-  
-  if (!auth) {
-    throw new Error('Firebase auth not initialized');
-  }
-  return auth.onAuthStateChanged(callback);
-};
-
-// Get current user
-export const getCurrentUser = () => {
-  if (!auth) {
-    return null;
-  }
-  return auth.currentUser;
-};
-
-// Sign out
 export const signOut = async () => {
-  // Ensure Firebase is initialized
-  if (typeof window !== 'undefined' && !auth) {
-    initializeFirebase();
-  }
-  
-  if (!auth) {
-    throw new Error('Firebase auth not initialized');
-  }
-  
   try {
     await auth.signOut();
     console.log('✅ User signed out');
@@ -185,6 +47,70 @@ export const signOut = async () => {
   }
 };
 
-// Export services
-export { auth, firestore, storage };
-export default app;
+
+// Verify OTP and authenticate user
+export const verifyOTP = async (verificationId: string, otp: string): Promise<{ success: boolean; user?: any; error?: string }> => {
+  try {
+    console.log('🔍 Verifying OTP:', otp);
+    console.log('🔑 Verification ID:', verificationId);
+    
+    // Validate OTP format
+    if (!otp || otp.length < 4 || otp.length > 8) {
+      console.log('❌ Invalid OTP format');
+      return {
+        success: false,
+        error: 'Invalid OTP format. Please enter the 6-digit code sent to your phone.'
+      };
+    }
+    
+    console.log('🔐 Creating credential...');
+    const credential = PhoneAuthProvider.credential(verificationId, otp);
+    console.log('✅ Credential created');
+    
+    console.log('🔑 Signing in with credential...');
+    const result = await signInWithCredential(auth, credential);
+    console.log('✅ Authentication successful!', result.user.uid);
+    
+    return {
+      success: true,
+      user: result.user
+    };
+  } catch (error: any) {
+    console.error('❌ Verify OTP error:', error);
+    console.error('Error code:', error.code);
+    console.error('Error message:', error.message);
+    
+    // Handle specific Firebase errors
+    if (error.code === 'auth/invalid-verification-code') {
+      return {
+        success: false,
+        error: 'Invalid OTP. Please check the code and try again.'
+      };
+    } else if (error.code === 'auth/code-expired') {
+      return {
+        success: false,
+        error: 'OTP has expired. Please request a new code.'
+      };
+    } else if (error.code === 'auth/invalid-verification-id') {
+      return {
+        success: false,
+        error: 'Verification session expired. Please start the process again.'
+      };
+    } else if (error.code === 'auth/network-request-failed') {
+      return {
+        success: false,
+        error: 'Network error. Please check your internet connection and try again.'
+      };
+    } else if (error.code === 'auth/too-many-requests') {
+      return {
+        success: false,
+        error: 'Too many failed attempts. Please wait before trying again.'
+      };
+    }
+    
+    return {
+      success: false,
+      error: error.message || 'Invalid OTP. Please try again.'
+    };
+  }
+};

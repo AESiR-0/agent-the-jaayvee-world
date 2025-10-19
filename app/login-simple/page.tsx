@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { sendOTP, completeAuth } from '@/lib/firebaseUtils';
-import { useFirebase } from '@/lib/useFirebase';
+import { verifyOTP, createRecaptchaVerifier, clearRecaptchaVerifier, signInWithPhoneNumber, auth } from '@/lib/firebaseClient';
 
-export default function LoginPage() {
+export default function SimpleLoginPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [verificationId, setVerificationId] = useState('');
@@ -13,23 +12,81 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const router = useRouter();
-  const { isInitialized: isFirebaseReady, error: firebaseError } = useFirebase();
 
   useEffect(() => {
     // Check if user is already logged in
-    const agentId = localStorage.getItem('agentId');
-    if (agentId) {
+    const userId = localStorage.getItem('userId');
+    if (userId) {
       router.push('/dashboard');
     }
   }, [router]);
 
+  const sendOTP = async (phoneNumber: string, recaptchaElementId: string = 'recaptcha-container') => {
+    try {
+      console.log('🔍 Sending OTP to:', phoneNumber);
+      
+      // Clear any existing reCAPTCHA
+      clearRecaptchaVerifier(recaptchaElementId);
+      console.log('🧹 Cleared reCAPTCHA');
+      
+      const recaptchaVerifier = createRecaptchaVerifier(recaptchaElementId);
+      console.log('🔐 Created reCAPTCHA verifier');
+      
+      console.log('📞 Calling signInWithPhoneNumber...');
+      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+      console.log('✅ OTP sent successfully!', confirmationResult.verificationId);
+      
+      return {
+        success: true,
+        verificationId: confirmationResult.verificationId
+      };
+    } catch (error: any) {
+      console.error('❌ Send OTP error:', error);
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      
+      // Handle specific Firebase errors
+      if (error.code === 'auth/too-many-requests') {
+        return {
+          success: false,
+          error: 'Too many OTP requests. Please wait 1-2 hours before trying again.'
+        };
+      } else if (error.code === 'auth/invalid-phone-number') {
+        return {
+          success: false,
+          error: 'Invalid phone number format. Please use international format like +91 9876543210'
+        };
+      } else if (error.code === 'auth/invalid-app-credential') {
+        return {
+          success: false,
+          error: 'Authentication service error. Please try again later.'
+        };
+      } else if (error.code === 'auth/captcha-check-failed') {
+        return {
+          success: false,
+          error: 'Security verification failed. Please try again.'
+        };
+      } else if (error.code === 'auth/network-request-failed') {
+        return {
+          success: false,
+          error: 'Network error. Please check your internet connection and try again.'
+        };
+      } else if (error.code === 'auth/quota-exceeded') {
+        return {
+          success: false,
+          error: 'SMS quota exceeded. Please try again later.'
+        };
+      }
+      
+      return {
+        success: false,
+        error: error.message || 'Failed to send OTP. Please try again.'
+      };
+    }
+  };
+
   const handlePhoneSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!isFirebaseReady) {
-      setError('Firebase is not ready. Please wait and try again.');
-      return;
-    }
     
     setIsLoading(true);
     setError('');
@@ -58,13 +115,13 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const result = await completeAuth(verificationId, otp);
+      const result = await verifyOTP(verificationId, otp);
       
       if (result.success && result.user) {
         // Store user data in localStorage
-        localStorage.setItem('firebaseToken', await result.user.getIdToken());
         localStorage.setItem('userId', result.user.uid);
         localStorage.setItem('phoneNumber', result.user.phoneNumber || '');
+        localStorage.setItem('verified', 'true');
         
         console.log('✅ Authentication complete, redirecting to dashboard');
         router.push('/dashboard');
@@ -84,38 +141,17 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-bold text-foreground">
-            Agents Dashboard
+            Firebase OTP Login
           </h2>
           <p className="mt-2 text-center text-sm text-foreground/70">
-            Sign in with your phone number
+            Sign in with your phone number using Firebase
           </p>
-          
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+            <p className="text-xs text-blue-800">
+              <strong>Firebase OTP:</strong> Direct integration with Firebase Auth. No environment variables needed.
+            </p>
+          </div>
         </div>
-
-
-        {!isFirebaseReady && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-            <p className="text-sm text-yellow-800">
-              ⏳ Initializing Firebase... Please wait.
-            </p>
-          </div>
-        )}
-
-        {firebaseError && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-            <p className="text-sm text-red-800">
-              ❌ Firebase Error: {firebaseError}
-            </p>
-          </div>
-        )}
-
-        {process.env.NODE_ENV === 'development' && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-            <p className="text-sm text-green-800">
-              🧪 <strong>Development Mode:</strong> Using mock authentication and backend responses. Backend API may not be available.
-            </p>
-          </div>
-        )}
 
         <div className="bg-white rounded-xl border border-border shadow-soft p-8">
           {step === 'phone' ? (
@@ -130,17 +166,20 @@ export default function LoginPage() {
                   required
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="+91 9876543210"
+                  placeholder="+919876543210"
                   className="mt-1 block w-full px-4 py-3 border border-border rounded-xl focus:ring-2 focus:ring-accent focus:border-accent"
                 />
+                <p className="mt-2 text-sm text-foreground/70">
+                  Enter phone number with country code (e.g., +919876543210)
+                </p>
               </div>
 
               <button
                 type="submit"
-                disabled={isLoading || !isFirebaseReady}
+                disabled={isLoading}
                 className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-accent hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent disabled:opacity-50"
               >
-                {isLoading ? 'Sending OTP...' : !isFirebaseReady ? 'Initializing...' : 'Send OTP'}
+                {isLoading ? 'Sending OTP...' : 'Send OTP'}
               </button>
             </form>
           ) : (
@@ -188,10 +227,15 @@ export default function LoginPage() {
             </div>
           )}
 
-          <div id="recaptcha-container"></div>
+          <div id="recaptcha-container" className="flex justify-center mt-4"></div>
+        </div>
+
+        <div className="text-center">
+          <p className="text-sm text-foreground/70">
+            🔥 Firebase Auth • 📱 Phone OTP • 🚀 No Environment Variables
+          </p>
         </div>
       </div>
-      
     </div>
   );
 }

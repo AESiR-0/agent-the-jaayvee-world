@@ -5,16 +5,6 @@ import {
   User
 } from 'firebase/auth';
 import { auth, createRecaptchaVerifier, clearRecaptchaVerifier } from './firebaseClient';
-import { API_BASE_URL } from './utils';
-import { isTestPhoneNumber, createMockVerification, verifyMockOTP } from './devAuth';
-
-// Ensure Firebase is initialized before use
-const ensureFirebaseInitialized = () => {
-  if (typeof window !== 'undefined' && !auth) {
-    // Re-import to trigger initialization
-    import('./firebaseClient');
-  }
-};
 
 export interface AuthResult {
   success: boolean;
@@ -22,65 +12,62 @@ export interface AuthResult {
   error?: string;
 }
 
-export interface BackendAuthResult {
-  agentId: string;
-  userId: string;
-  displayName: string;
-}
+// Phone number validation and formatting
+const validateAndFormatPhoneNumber = (phoneNumber: string): string => {
+  let cleaned = phoneNumber.replace(/[^\d+]/g, '');
+  
+  if (!cleaned.startsWith('+')) {
+    if (cleaned.startsWith('0')) {
+      cleaned = '+91 ' + cleaned.substring(1);
+    } else if (cleaned.length === 10) {
+      cleaned = '+91 ' + cleaned;
+    } else {
+      cleaned = '+91 ' + cleaned;
+    }
+  }
+  
+  // Validate the format
+  const phoneRegex = /^\+[1-9]\d{1,14}$/;
+  if (!phoneRegex.test(cleaned)) {
+    throw new Error('Invalid phone number format. Please use international format like +91 9876543210');
+  }
+  
+  return cleaned;
+};
 
 /**
  * Send OTP to phone number
  */
 export const sendOTP = async (phoneNumber: string, recaptchaElementId: string = 'recaptcha-container'): Promise<{ success: boolean; verificationId?: string; error?: string }> => {
   try {
-    // Check if this is a test phone number in development
-    if (process.env.NODE_ENV === 'development' && isTestPhoneNumber(phoneNumber)) {
-      console.log('🧪 Development mode: Using mock authentication for test number');
-      const mockVerification = createMockVerification(phoneNumber);
-      return {
-        success: true,
-        verificationId: mockVerification.verificationId
-      };
-    }
+    console.log('🔍 Sending OTP to:', phoneNumber);
     
-    // Ensure Firebase is initialized for real numbers
-    ensureFirebaseInitialized();
+    const formattedPhoneNumber = validateAndFormatPhoneNumber(phoneNumber);
+    console.log('📱 Formatted phone number:', formattedPhoneNumber);
     
-    if (!auth) {
-      throw new Error('Firebase auth not initialized');
-    }
-    
-    // Check for test phone numbers (Indian numbers)
-    const testPhoneNumbers = [
-      '+91 9876543210',  // Indian test number
-      '+91 9876543211',  // Indian test number
-      '+91 9876543212',  // Indian test number
-      '+91 9999999999',  // Indian test number
-      '+91 8888888888',  // Indian test number
-    ];
-    
-    if (testPhoneNumbers.includes(phoneNumber)) {
-      console.log('🧪 Using test phone number - OTP will be: 123456');
-    }
-    
-    // Clear any existing reCAPTCHA
     clearRecaptchaVerifier(recaptchaElementId);
+    console.log('🧹 Cleared reCAPTCHA');
     
     const recaptchaVerifier = createRecaptchaVerifier(recaptchaElementId);
-    const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+    console.log('🔐 Created reCAPTCHA verifier');
+    
+    console.log('📞 Calling signInWithPhoneNumber...');
+    const confirmationResult = await signInWithPhoneNumber(auth, formattedPhoneNumber, recaptchaVerifier);
+    console.log('✅ OTP sent successfully!', confirmationResult.verificationId);
     
     return {
       success: true,
       verificationId: confirmationResult.verificationId
     };
   } catch (error: any) {
-    console.error('Send OTP error:', error);
+    console.error('❌ Send OTP error:', error);
+    console.error('Error code:', error.code);
+    console.error('Error message:', error.message);
     
-    // Handle specific Firebase errors
     if (error.code === 'auth/too-many-requests') {
       return {
         success: false,
-        error: 'Too many requests. Please wait 1-2 hours before trying again, or use a test phone number: +1 650-555-3434'
+        error: 'Too many OTP requests. Please wait 1-2 hours before trying again.'
       };
     } else if (error.code === 'auth/invalid-phone-number') {
       return {
@@ -90,131 +77,118 @@ export const sendOTP = async (phoneNumber: string, recaptchaElementId: string = 
     } else if (error.code === 'auth/invalid-app-credential') {
       return {
         success: false,
-        error: 'Firebase configuration error. Please check your Firebase setup.'
+        error: 'Authentication service error. Please try again later.'
+      };
+    } else if (error.code === 'auth/captcha-check-failed') {
+      return {
+        success: false,
+        error: 'Security verification failed. Please try again.'
+      };
+    } else if (error.code === 'auth/network-request-failed') {
+      return {
+        success: false,
+        error: 'Network error. Please check your internet connection and try again.'
+      };
+    } else if (error.code === 'auth/quota-exceeded') {
+      return {
+        success: false,
+        error: 'SMS quota exceeded. Please try again later.'
+      };
+    } else if (error.message && error.message.includes('Invalid phone number format')) {
+      return {
+        success: false,
+        error: error.message
       };
     }
     
     return {
       success: false,
-      error: error.message || 'Failed to send OTP'
+      error: error.message || 'Failed to send OTP. Please try again.'
     };
   }
 };
 
-/**
- * Verify OTP and authenticate user
- */
 export const verifyOTP = async (verificationId: string, otp: string): Promise<AuthResult> => {
   try {
-    // Check if this is a mock verification (development mode)
-    if (verificationId.startsWith('mock_')) {
-      console.log('🧪 Development mode: Verifying mock OTP');
-      if (verifyMockOTP(verificationId, otp)) {
-        // Create a mock user object
-        const mockUser = {
-          uid: `mock_${Date.now()}`,
-          phoneNumber: verificationId.split('_')[2],
-          getIdToken: async () => 'mock_token_' + Date.now()
-        } as any;
-        
-        return {
-          success: true,
-          user: mockUser
-        };
-      } else {
-        return {
-          success: false,
-          error: 'Invalid OTP. Use 123456 for test numbers.'
-        };
-      }
+    console.log('🔍 Verifying OTP:', otp);
+    console.log('🔑 Verification ID:', verificationId);
+    
+    if (!otp || otp.length < 4 || otp.length > 8) {
+      console.log('❌ Invalid OTP format');
+      return {
+        success: false,
+        error: 'Invalid OTP format. Please enter the 6-digit code sent to your phone.'
+      };
     }
     
-    // Ensure Firebase is initialized for real verification
-    ensureFirebaseInitialized();
-    
-    if (!auth) {
-      throw new Error('Firebase auth not initialized');
-    }
-    
+    console.log('🔐 Creating credential...');
     const credential = PhoneAuthProvider.credential(verificationId, otp);
+    console.log('✅ Credential created');
+    
+    console.log('🔑 Signing in with credential...');
     const result = await signInWithCredential(auth, credential);
+    console.log('✅ Authentication successful!', result.user.uid);
     
     return {
       success: true,
       user: result.user
     };
   } catch (error: any) {
-    console.error('Verify OTP error:', error);
+    console.error('❌ Verify OTP error:', error);
+    console.error('Error code:', error.code);
+    console.error('Error message:', error.message);
+    
+    if (error.code === 'auth/invalid-verification-code') {
+      return {
+        success: false,
+        error: 'Invalid OTP. Please check the code and try again.'
+      };
+    } else if (error.code === 'auth/code-expired') {
+      return {
+        success: false,
+        error: 'OTP has expired. Please request a new code.'
+      };
+    } else if (error.code === 'auth/invalid-verification-id') {
+      return {
+        success: false,
+        error: 'Verification session expired. Please start the process again.'
+      };
+    } else if (error.code === 'auth/network-request-failed') {
+      return {
+        success: false,
+        error: 'Network error. Please check your internet connection and try again.'
+      };
+    } else if (error.code === 'auth/too-many-requests') {
+      return {
+        success: false,
+        error: 'Too many failed attempts. Please wait before trying again.'
+      };
+    }
+    
     return {
       success: false,
-      error: error.message || 'Invalid OTP'
+      error: error.message || 'Invalid OTP. Please try again.'
     };
   }
 };
 
-/**
- * Verify Firebase token with backend
- */
-export const verifyTokenWithBackend = async (idToken: string): Promise<BackendAuthResult> => {
-  try {
-    console.log('🔗 Attempting to verify token with backend:', API_BASE_URL);
-    
-    const response = await fetch(`${API_BASE_URL}/agents/auth/verify-token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ idToken }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Token verification failed');
-    }
-
-    const data = await response.json();
-    console.log('✅ Backend verification successful');
-    return data;
-  } catch (error: any) {
-    console.error('❌ Backend verification error:', error);
-    
-    // If it's a network error and we're in development, provide a fallback
-    if (process.env.NODE_ENV === 'development' && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'))) {
-      console.log('🧪 Development mode: Using mock backend response');
-      return {
-        agentId: 'DEV_AGENT_001',
-        userId: 'DEV_USER_001',
-        displayName: 'Development Agent'
-      };
-    }
-    
-    throw new Error(error.message || 'Backend verification failed');
-  }
-};
-
-/**
- * Complete authentication flow
- */
 export const completeAuth = async (
   verificationId: string, 
   otp: string
-): Promise<{ success: boolean; data?: BackendAuthResult; error?: string }> => {
+): Promise<{ success: boolean; user?: User; error?: string }> => {
   try {
-    // Verify OTP
     const otpResult = await verifyOTP(verificationId, otp);
     if (!otpResult.success || !otpResult.user) {
       return { success: false, error: otpResult.error };
     }
 
-    // Get Firebase token
     const idToken = await otpResult.user.getIdToken();
     
-    // Verify with backend
-    const backendResult = await verifyTokenWithBackend(idToken);
+    localStorage.setItem('firebaseToken', idToken);
     
     return {
       success: true,
-      data: backendResult
+      user: otpResult.user
     };
   } catch (error: any) {
     console.error('Complete auth error:', error);
@@ -223,46 +197,4 @@ export const completeAuth = async (
       error: error.message || 'Authentication failed'
     };
   }
-};
-
-/**
- * Store user data in localStorage
- */
-export const storeUserData = (data: BackendAuthResult, firebaseToken: string) => {
-  localStorage.setItem('agentId', data.agentId);
-  localStorage.setItem('userId', data.userId);
-  localStorage.setItem('displayName', data.displayName);
-  localStorage.setItem('firebaseToken', firebaseToken);
-  console.log('✅ User data stored in localStorage');
-};
-
-/**
- * Clear user data from localStorage
- */
-export const clearUserData = () => {
-  localStorage.removeItem('agentId');
-  localStorage.removeItem('userId');
-  localStorage.removeItem('displayName');
-  localStorage.removeItem('firebaseToken');
-  console.log('✅ User data cleared from localStorage');
-};
-
-/**
- * Get stored user data
- */
-export const getStoredUserData = () => {
-  return {
-    agentId: localStorage.getItem('agentId'),
-    userId: localStorage.getItem('userId'),
-    displayName: localStorage.getItem('displayName'),
-    firebaseToken: localStorage.getItem('firebaseToken')
-  };
-};
-
-/**
- * Check if user is authenticated
- */
-export const isAuthenticated = (): boolean => {
-  const { agentId, userId, firebaseToken } = getStoredUserData();
-  return !!(agentId && userId && firebaseToken);
 };
