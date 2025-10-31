@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import StatCard from '@/components/StatCard';
+import { UpdatesPanel } from '@/components/UpdatesPanel';
 import { fetchWithAuth, API_BASE_URL } from '@/lib/utils';
 import { QrCode, Users, DollarSign } from 'lucide-react';
 
@@ -86,6 +87,14 @@ export default function DashboardPage() {
             title="Commission Earned"
             value={`₹${data.commission.toLocaleString()}`}
             icon={<DollarSign className="h-8 w-8" />}
+          />
+        </div>
+
+        {/* Updates Panel */}
+        <div className="mb-8">
+          <UpdatesPanel 
+            audience="agent" 
+            apiBaseUrl="https://thejaayveeworld.com"
           />
         </div>
 
